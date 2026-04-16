@@ -1,0 +1,22 @@
+{{/* templates/hpa.yaml — HorizontalPodAutoscaler */}}
+{{- if not .Values.app.keda.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name:      {{ .Values.app.name }}-hpa
+  namespace: {{ .Values.global.namespace }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind:       Deployment
+    name:       {{ .Values.app.name }}
+  minReplicas: {{ .Values.app.replicas }}
+  maxReplicas: {{ .Values.app.keda.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type:               Utilization
+          averageUtilization: 70
+{{- end }}

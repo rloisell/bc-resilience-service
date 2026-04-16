@@ -1,0 +1,222 @@
+# .github/workflows/build-and-push.yml — bc-resilience-service
+# Ryan Loisell — Developer / Architect | GitHub Copilot | April 2026
+#
+# ISB EA Option 2 pipeline:
+#   develop → build → policy-gate → push image → update-gitops dev
+#   test    → build → policy-gate → push image → update-gitops test
+#   main    → build → policy-gate → push image → create prod PR in gitops repo
+#   v*      → same as main (release tag)
+
+name: Build and Push
+
+on:
+  push:
+    branches: [main, develop, test]
+    tags:     ['v*']
+  pull_request:
+    branches: [main, develop, test]
+
+env:
+  REGISTRY:     artifacts.developer.gov.bc.ca
+  IMAGE:        be808f-docker-local/bc-resilience-service
+  GITOPS_REPO:  rloisell/bc-resilience-service-gitops
+
+permissions:
+  contents:      read
+  security-events: write
+
+jobs:
+  # ── Build + Scan ─────────────────────────────────────────────────────────────
+  build:
+    name: Build & Scan
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout (recursive — includes ocp-resilience-toolkit submodule)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
+        with:
+          submodules: recursive
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbea8a986b848fa9e6b24cd35bbc  # v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build image
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b5b5  # v6
+        with:
+          context:     .
+          file:        containerization/Containerfile
+          push:        false
+          tags:        ${{ steps.meta.outputs.tags }}
+          labels:      ${{ steps.meta.outputs.labels }}
+          cache-from:  type=gha
+          cache-to:    type=gha,mode=max
+          outputs:     type=docker,dest=/tmp/image.tar
+
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@18f2505d82a7a2e61e72c80bb3e0876bbc9f10e8  # 0.29.0
+        with:
+          input:          /tmp/image.tar
+          format:         sarif
+          output:         trivy-results.sarif
+          severity:       CRITICAL,HIGH
+          exit-code:      "1"
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@45775bd8235c68ba998cffa5171334d58593da47  # v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Save image for next jobs
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf7f  # v4
+        with:
+          name: container-image
+          path: /tmp/image.tar
+
+
+  # ── Policy Gate ───────────────────────────────────────────────────────────────
+  policy-gate:
+    name: Policy Gate (Datree + Polaris + kube-linter + Conftest)
+    runs-on: ubuntu-latest
+    needs:   build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112  # v4
+
+      - name: Render Helm templates
+        run: |
+          helm template bc-resilience gitops/charts/bc-resilience \
+            -f gitops/charts/bc-resilience/values.yaml \
+            --output-dir ./rendered
+
+      - name: Install policy tools
+        run: |
+          # Polaris
+          curl -sSLf https://github.com/FairwindsOps/polaris/releases/latest/download/polaris_linux_amd64.tar.gz \
+            | tar xz -C /usr/local/bin polaris
+          # kube-linter
+          curl -sSLf https://github.com/stackrox/kube-linter/releases/latest/download/kube-linter-linux \
+            -o /usr/local/bin/kube-linter && chmod +x /usr/local/bin/kube-linter
+          # Conftest
+          curl -sSLf https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_Linux_x86_64.tar.gz \
+            | tar xz -C /usr/local/bin conftest
+
+      - name: Run Polaris
+        run: polaris audit --audit-path ./rendered --format pretty --set-exit-code-on-danger
+
+      - name: Run kube-linter
+        run: kube-linter lint ./rendered
+
+      - name: Run Conftest
+        run: |
+          conftest test ./rendered \
+            --policy .github/policies/
+
+
+  # ── Push ─────────────────────────────────────────────────────────────────────
+  push:
+    name: Push Image
+    runs-on: ubuntu-latest
+    needs:   [build, policy-gate]
+    if: github.event_name == 'push'
+    steps:
+      - name: Download image
+        uses: actions/download-artifact@fa0a91b85d4f404e444306234c78e7d8b5e7b60e  # v4
+        with:
+          name: container-image
+          path: /tmp
+
+      - name: Load image
+        run: docker load < /tmp/image.tar
+
+      - name: Login to Artifactory
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ARTIFACTORY_USER }}
+          password: ${{ secrets.ARTIFACTORY_TOKEN }}
+
+      - name: Push image
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b5b5  # v6
+        with:
+          context:     .
+          file:        containerization/Containerfile
+          push:        true
+          tags:        ${{ needs.build.outputs.image-tag }}
+          cache-from:  type=gha
+
+
+  # ── Update GitOps (dev / test) ────────────────────────────────────────────────
+  update-gitops:
+    name: Update GitOps (${{ github.ref_name }})
+    runs-on: ubuntu-latest
+    needs:   push
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/test'
+    steps:
+      - name: Checkout gitops repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token:      ${{ secrets.GITOPS_TOKEN }}
+          ref: ${{ github.ref_name == 'develop' && 'develop' || 'test' }}
+
+      - name: Update image tag
+        run: |
+          TAG="${{ needs.build.outputs.image-tag }}"
+          sed -i "s|tag:.*|tag: ${TAG}|" charts/bc-resilience/values.yaml
+          git config user.name  "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add charts/bc-resilience/values.yaml
+          git commit -m "chore: update bc-resilience-service image tag to ${TAG} [skip ci]"
+          git push
+
+
+  # ── Create Prod PR ────────────────────────────────────────────────────────────
+  create-prod-pr:
+    name: Create Prod GitOps PR
+    runs-on: ubuntu-latest
+    needs:   push
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout gitops repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token:      ${{ secrets.GITOPS_TOKEN }}
+          ref:        main
+
+      - name: Create release branch + update tag
+        run: |
+          TAG="${{ needs.build.outputs.image-tag }}"
+          BRANCH="release/${TAG}"
+          git checkout -b "${BRANCH}"
+          sed -i "s|tag:.*|tag: ${TAG}|" charts/bc-resilience/values.yaml
+          git config user.name  "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add charts/bc-resilience/values.yaml
+          git commit -m "chore: promote bc-resilience-service ${TAG} to prod"
+          git push origin "${BRANCH}"
+
+      - name: Create PR
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+        run: |
+          TAG="${{ needs.build.outputs.image-tag }}"
+          gh pr create \
+            --repo "${{ env.GITOPS_REPO }}" \
+            --base main \
+            --head "release/${TAG}" \
+            --title "Promote bc-resilience-service ${TAG} → prod" \
+            --body  "Automated promotion from CI. Review and merge to deploy to production."

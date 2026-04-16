@@ -1,0 +1,107 @@
+{{/* templates/deployment.yaml — bc-resilience-service */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.app.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app:         {{ .Values.app.name }}
+    DataClass:   Low
+    owner:       rloisell
+    environment: {{ .Values.global.environment }}
+spec:
+  {{- if not .Values.app.keda.enabled }}
+  replicas: {{ .Values.app.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Values.app.name }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge:       1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app:         {{ .Values.app.name }}
+        DataClass:   Low
+        owner:       rloisell
+        environment: {{ .Values.global.environment }}
+    spec:
+      priorityClassName: {{ .Values.app.priorityClassName }}
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 0
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: {{ .Values.app.name }}
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: {{ .Values.app.name }}
+          image: {{ .Values.app.image }}:{{ .Values.app.tag }}
+          imagePullPolicy: Always
+          securityContext:
+            runAsNonRoot:             true
+            runAsUser:                1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name:          http
+              containerPort: 8080
+              protocol:      TCP
+          resources:
+            requests:
+              cpu:    {{ .Values.app.resources.requests.cpu }}
+              memory: {{ .Values.app.resources.requests.memory }}
+            limits:
+              cpu:    {{ .Values.app.resources.limits.cpu }}
+              memory: {{ .Values.app.resources.limits.memory }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds:       20
+            failureThreshold:    3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds:       10
+            failureThreshold:    3
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 8080
+            failureThreshold: 12
+            periodSeconds:    5
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+          envFrom:
+            - secretRef:
+                name: {{ .Values.app.name }}-secret
+          env:
+            {{- range $key, $val := .Values.app.env }}
+            - name:  {{ $key }}
+              value: {{ $val | quote }}
+            {{- end }}
+            - name: PORT
+              value: "8080"
+          volumeMounts:
+            - name:      work-dir
+              mountPath: /tmp/bc-resilience-work
+      volumes:
+        - name: work-dir
+          emptyDir:
+            sizeLimit: 2Gi

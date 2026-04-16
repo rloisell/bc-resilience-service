@@ -1,0 +1,7 @@
+# gitops/charts/bc-resilience/Chart.yaml
+apiVersion: v2
+name:        bc-resilience
+description: OCP Resilience Posture Analysis — GitHub Copilot Extension
+type:        application
+version:     0.1.0
+appVersion:  "1.0.0"

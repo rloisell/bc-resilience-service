@@ -1,0 +1,10 @@
+# .gitmodules — bc-resilience-service
+[submodule ".github/agents"]
+  path   = .github/agents
+  url    = https://github.com/rloisell/rl-agents-n-skills.git
+  branch = main
+
+[submodule "submodules/ocp-resilience-toolkit"]
+  path   = submodules/ocp-resilience-toolkit
+  url    = https://github.com/rloisell/ocp-resilience-toolkit.git
+  branch = main

@@ -1,0 +1,21 @@
+{{/* templates/httpscaledobject.yaml — KEDA HTTP Add-on (dev/tools scale-to-zero) */}}
+{{- if .Values.app.keda.enabled }}
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name:      {{ .Values.app.name }}-http-scaler
+  namespace: {{ .Values.global.namespace }}
+spec:
+  hosts:
+    - {{ .Values.app.route.host }}
+  scaleTargetRef:
+    apiVersion:  apps/v1
+    kind:        Deployment
+    name:        {{ .Values.app.name }}
+    service:     {{ .Values.app.name }}
+    port:        {{ .Values.app.service.port }}
+  replicas:
+    min:         {{ .Values.app.keda.minReplicas }}
+    max:         {{ .Values.app.keda.maxReplicas }}
+  scaledownPeriod: {{ .Values.app.keda.scaledownPeriod }}
+{{- end }}

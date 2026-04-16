@@ -1,0 +1,11 @@
+{{/* templates/pdb.yaml — PodDisruptionBudget (mirrors what the service recommends) */}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name:      {{ .Values.app.name }}-pdb
+  namespace: {{ .Values.global.namespace }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.app.name }}

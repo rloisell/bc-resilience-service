@@ -1,0 +1,21 @@
+{{/* templates/route.yaml — edge-terminated OCP Route */}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name:      {{ .Values.app.name }}
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    isb.gov.bc.ca/edge-termination-approval: {{ index .Values.app.route.annotations "isb.gov.bc.ca/edge-termination-approval" | quote }}
+  labels:
+    app: {{ .Values.app.name }}
+spec:
+  host: {{ .Values.app.route.host }}
+  to:
+    kind:   Service
+    name:   {{ .Values.app.name }}
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination:                 edge
+    insecureEdgeTerminationPolicy: Redirect

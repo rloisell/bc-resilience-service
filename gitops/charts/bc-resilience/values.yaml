@@ -1,0 +1,49 @@
+# gitops/charts/bc-resilience/values.yaml — default (dev) values
+# Ryan Loisell — Developer / Architect | GitHub Copilot | April 2026
+
+global:
+  namespace:    be808f-dev
+  environment:  dev
+
+app:
+  name:     bc-resilience-service
+  image:    artifacts.developer.gov.bc.ca/be808f-docker-local/bc-resilience-service
+  tag:      latest
+  replicas: 2
+
+  resources:
+    requests:
+      cpu:    100m
+      memory: 256Mi
+    limits:
+      cpu:    500m
+      memory: 512Mi
+
+  priorityClassName: low-priority
+
+  service:
+    port: 8080
+
+  route:
+    host:        bc-resilience-dev.apps.silver.devops.gov.bc.ca
+    annotations:
+      isb.gov.bc.ca/edge-termination-approval: "approved"
+
+  keda:
+    enabled:   true
+    minReplicas: 0
+    maxReplicas: 5
+    scaledownPeriod: 300
+
+  externalSecret:
+    refreshInterval: 1h
+    secretStoreName: be808f-vault
+    secretStoreKind: ClusterSecretStore
+    vaultPath:       be808f-dev/bc-resilience-service
+
+  env:
+    LOG_LEVEL:     info
+    TOOLKIT_PATH:  ./submodules/ocp-resilience-toolkit
+    WORK_DIR:      /tmp/bc-resilience-work
+    LLM_API_BASE:  https://models.inference.ai.azure.com
+    LLM_MODEL:     openai/gpt-4o

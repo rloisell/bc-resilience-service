@@ -1,0 +1,23 @@
+# gitops/charts/bc-resilience/values-prod.yaml
+global:
+  namespace:   be808f-prod
+  environment: prod
+
+app:
+  replicas: 3
+  resources:
+    requests:
+      cpu:    200m
+      memory: 512Mi
+    limits:
+      cpu:    1000m
+      memory: 1Gi
+  priorityClassName: medium-priority
+  route:
+    host: bc-resilience.apps.silver.devops.gov.bc.ca
+  keda:
+    enabled:     false
+    minReplicas:  3
+    maxReplicas: 10
+  externalSecret:
+    vaultPath: be808f-prod/bc-resilience-service

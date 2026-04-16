@@ -1,0 +1,16 @@
+{{/* templates/service.yaml */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name:      {{ .Values.app.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.app.name }}
+spec:
+  selector:
+    app: {{ .Values.app.name }}
+  ports:
+    - name:       http
+      port:       {{ .Values.app.service.port }}
+      targetPort: http
+  type: ClusterIP

@@ -1,0 +1,89 @@
+{{/* templates/networkpolicies.yaml — ag-helm intent-based NetworkPolicy */}}
+{{/* AllowIngressFrom: ingress controller on port 8080                  */}}
+{{/* AllowEgressTo internet:443 for GitHub API + GitHub Models          */}}
+{{/* AllowEgressTo internet:6443 for OCP Silver/Gold APIs               */}}
+{{/* AllowEgressTo DNS:53                                               */}}
+
+# Ingress from OCP Router
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name:      {{ .Values.app.name }}-allow-ingress-from-router
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    ag-helm.io/intent: AllowIngressFrom
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Values.app.name }}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-ingress
+      ports:
+        - port:     8080
+          protocol: TCP
+  policyTypes: [Ingress]
+---
+# Egress to GitHub API + GitHub Models (HTTPS)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name:      {{ .Values.app.name }}-allow-egress-github
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    ag-helm.io/intent:                 AllowEgressTo
+    isb.gov.bc.ca/internet-egress:     "true"
+    isb.gov.bc.ca/justification:       "GitHub Copilot Extensions API, GitHub Models inference API, GitHub Releases upload"
+    isb.gov.bc.ca/approvedBy:          "Platform Services"
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Values.app.name }}
+  egress:
+    - ports:
+        - port:     443
+          protocol: TCP
+  policyTypes: [Egress]
+---
+# Egress to OCP API servers (Silver + Gold)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name:      {{ .Values.app.name }}-allow-egress-ocp-api
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    ag-helm.io/intent:                 AllowEgressTo
+    isb.gov.bc.ca/internet-egress:     "true"
+    isb.gov.bc.ca/justification:       "Read-only access to Silver/Gold OCP APIs for namespace data collection"
+    isb.gov.bc.ca/approvedBy:          "Platform Services"
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Values.app.name }}
+  egress:
+    - ports:
+        - port:     6443
+          protocol: TCP
+  policyTypes: [Egress]
+---
+# Egress DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name:      {{ .Values.app.name }}-allow-egress-dns
+  namespace: {{ .Values.global.namespace }}
+  annotations:
+    ag-helm.io/intent: AllowEgressTo
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Values.app.name }}
+  egress:
+    - ports:
+        - port:     53
+          protocol: UDP
+        - port:     53
+          protocol: TCP
+  policyTypes: [Egress]

@@ -1,0 +1,13 @@
+# gitops/charts/bc-resilience/values-test.yaml
+global:
+  namespace:   be808f-test
+  environment: test
+
+app:
+  replicas: 2
+  route:
+    host: bc-resilience-test.apps.silver.devops.gov.bc.ca
+  keda:
+    minReplicas: 1
+  externalSecret:
+    vaultPath: be808f-test/bc-resilience-service

@@ -1,0 +1,30 @@
+# gitops/argocd/bc-resilience-service-prod.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name:      bc-resilience-service-prod
+  namespace: openshift-gitops
+  labels:
+    app.kubernetes.io/name:       bc-resilience-service
+    app.kubernetes.io/managed-by: argocd
+    environment:                  prod
+spec:
+  project: default
+  source:
+    repoURL:        https://github.com/rloisell/bc-resilience-service-gitops.git
+    targetRevision: main
+    path:           charts/bc-resilience
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+  destination:
+    server:    https://kubernetes.default.svc
+    namespace: be808f-prod
+  syncPolicy:
+    automated:
+      prune:    false   # prod: manual pruning only
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ApplyOutOfSyncOnly=true
